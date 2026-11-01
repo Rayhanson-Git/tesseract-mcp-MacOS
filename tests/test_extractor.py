@@ -209,10 +209,11 @@ def test_resolve_wraps_powershell_shim():
         which=lambda n: r"C:\npm\codex.ps1",
     )
     ex.extract("N.md", "c")
-    assert runner.calls[0] == [
+    assert runner.calls[0][:7] == [
         "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
         "-File", r"C:\npm\codex.ps1", "exec",
     ]
+    assert "--sandbox" in runner.calls[0]
 
 
 def test_resolve_native_exe_runs_directly():
@@ -222,7 +223,9 @@ def test_resolve_native_exe_runs_directly():
         which=lambda n: r"C:\bin\claude.exe",
     )
     ex.extract("N.md", "c")
-    assert runner.calls[0] == [r"C:\bin\claude.exe", "-p"]
+    assert runner.calls[0][:2] == [r"C:\bin\claude.exe", "-p"]
+    assert "--tools" in runner.calls[0]
+    assert "mcp__*" in runner.calls[0]
 
 
 def test_resolve_missing_binary_raises():

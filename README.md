@@ -216,10 +216,11 @@ syncs on one vault.
   original full-install behavior for backwards compatibility.
 - **Operator scope.** `provision --scope claude-only` installs only Claude/
   conventions, without touching vault-root guides, settings or plugins.
-- **Untrusted content.** Note text is passed to the extractor CLI (`claude -p` /
-  `codex exec`) and results are written back as notes. Content ingested via
-  the `fetch` and `arxiv` servers is untrusted; don't grant the extractor
-  extra tool access.
+- **Untrusted content.** Extractors run with a temporary working directory.
+  Codex uses read-only sandbox and ephemeral sessions; Claude disables
+  built-in and MCP tools. `fetch`/`arxiv` notes remain untrusted, and
+  extraction results must not automatically authorize actions. Use a separate
+  OS or container sandbox for stronger defense against hostile inputs.
 
 Set `TESSERACT_OWNER` before first provisioning to use a personal owner name
 in newly created root `AGENTS.md` / `CLAUDE.md` guides. Existing guides
