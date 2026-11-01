@@ -23,7 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 _BIN = "Scripts" if sys.platform == "win32" else "bin"
 _EXE = "tesseract-mcp.exe" if sys.platform == "win32" else "tesseract-mcp"
 DEFAULT_EXE = str(REPO_ROOT / ".venv" / _BIN / _EXE)
-DEFAULT_VAULT = r"C:\Vaults\Tesseract"
+DEFAULT_VAULT = os.environ.get("TESSERACT_VAULT_PATH")
 
 # Sentinel distinguishing "stream hit EOF" (child closed stdout, almost
 # certainly because it exited) from "still waiting" and from real data.
@@ -67,6 +67,9 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=30.0,
                         help="seconds to wait for the search response")
     args = parser.parse_args()
+    if not args.vault:
+        print("FAIL: --vault PATH or TESSERACT_VAULT_PATH is required")
+        return 1
 
     env = dict(os.environ, TESSERACT_VAULT_PATH=args.vault)
     try:

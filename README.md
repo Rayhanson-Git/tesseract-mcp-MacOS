@@ -199,8 +199,8 @@ syncs on one vault.
 
 ## Security notes
 
-- **Read-only mode.** Set `TESSERACT_READONLY=1` in the MCP server's environment
-  to unregister every tool that writes (search, read, graph lookups and
+- **Read-only mode.** Set `TESSERACT_READONLY=1` before starting the MCP
+  server so only read tools register without private FastMCP internals (search, read, graph lookups and
   `librarian_status` remain). Useful when an agent must not touch the vault.
 - **Write scope.** The "agents write only under `Claude/`" rule is enforced by
   the MCP server's write tools. The operator CLIs (`provision`, `indexer`,
@@ -211,6 +211,10 @@ syncs on one vault.
   `codex exec`) and results are written back as notes. Content ingested via
   the `fetch` and `arxiv` servers is untrusted; don't grant the extractor
   extra tool access.
+
+Set `TESSERACT_OWNER` before first provisioning to use a personal owner name
+in newly created root `AGENTS.md` / `CLAUDE.md` guides. Existing guides
+are preserved; otherwise neutral owner wording is installed.
 
 ## Scheduled maintenance
 

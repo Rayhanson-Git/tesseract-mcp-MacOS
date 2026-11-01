@@ -29,6 +29,24 @@ capture for stray thoughts; add_task for follow-ups; upsert_concept to grow
 evergreen knowledge (search first, extend rather than duplicate)."""
 
 mcp = FastMCP("tesseract", instructions=INSTRUCTIONS)
+# Tools that never write to the vault (the allow-list for read-only mode).
+READ_ONLY_TOOLS = frozenset({
+    "search_brain", "context_bundle", "read_note", "query_notes",
+    "get_backlinks", "list_recent", "list_tasks", "recall_bundle",
+    "sheet_query", "sheet_schema", "onboard", "find_entity",
+    "related_notes", "graph_stats", "librarian_status",
+})
+
+def _read_only_enabled() -> bool:
+    return os.environ.get("TESSERACT_READONLY", "").lower() in ("1", "true", "yes")
+
+
+def register_tool(fn):
+    """Register the permitted tools using the public FastMCP decorator."""
+    if not _read_only_enabled() or fn.__name__ in READ_ONLY_TOOLS:
+        return mcp.tool()(fn)
+    return fn
+
 
 _vault: Vault | None = None
 _embedder = None
@@ -64,7 +82,7 @@ def _warm_start() -> None:
     _get_embedder()
 
 
-@mcp.tool()
+@register_tool
 def search_brain(
     query: str,
     tags: list[str] | None = None,
@@ -82,7 +100,7 @@ def search_brain(
     return [{"path": h.path, "excerpt": h.excerpt} for h in hits]
 
 
-@mcp.tool()
+@register_tool
 def context_bundle(query: str, hops: int = 2, limit: int = 10) -> dict:
     """One-call GraphRAG context: hybrid-search hits for the query, the
     graph entities those hits mention, and notes connected to those entities
@@ -118,7 +136,7 @@ def context_bundle(query: str, hops: int = 2, limit: int = 10) -> dict:
     return {"hits": result_hits, "entities": entities, "related_notes": related}
 
 
-@mcp.tool()
+@register_tool
 def organize_vault(apply: bool = False) -> dict:
     """Neighbor-vote sweep of the vault's topical folders. Dry-run by
     default: returns {moved, proposals, skipped} without touching files.
@@ -128,7 +146,7 @@ def organize_vault(apply: bool = False) -> dict:
     return organizer_mod.run_sweep(get_vault(), _get_embedder(), apply=apply)
 
 
-@mcp.tool()
+@register_tool
 def librarian_status() -> dict:
     """Last Librarian caretaker sweep: per-step results, health checks
     (stale embeddings, manifest drift, orphaned entities, cache consistency),
@@ -137,7 +155,7 @@ def librarian_status() -> dict:
     return librarian_mod.status(get_vault())
 
 
-@mcp.tool()
+@register_tool
 def recall_bundle(
     mode: str, project: str | None = None, since: str | None = None
 ) -> dict:
@@ -158,7 +176,7 @@ def recall_bundle(
     raise VaultError(f"mode must be 'digest' or 'resume', got {mode!r}")
 
 
-@mcp.tool()
+@register_tool
 def sheet_upsert(
     sheet: str, fields: dict, body: str | None = None, agent: str = "claude"
 ) -> dict:
@@ -171,7 +189,7 @@ def sheet_upsert(
     return sheets_mod.upsert(get_vault(), sheet, fields, body=body, agent=agent)
 
 
-@mcp.tool()
+@register_tool
 def sheet_query(sheet: str, filters: dict | None = None,
                 sort: dict | None = None, limit: int = 50) -> list[dict]:
     """Typed query over a sheet's rows. Filters: {column: {op: value}} with
@@ -181,14 +199,14 @@ def sheet_query(sheet: str, filters: dict | None = None,
     return sheets_mod.query(get_vault(), sheet, filters, sort=sort, limit=limit)
 
 
-@mcp.tool()
+@register_tool
 def sheet_schema(sheet: str | None = None) -> dict:
     """No arg: list registered sheets (folder + row count). With a sheet
     name: full contract — columns, types, key, filing instructions."""
     return sheets_mod.schema_info(get_vault(), sheet)
 
 
-@mcp.tool()
+@register_tool
 def undo_move(path: str) -> dict:
     """Reverse the organizer's most recent move of the given note (current
     vault-relative path). Restores the file, its inbound links, and the
@@ -196,13 +214,13 @@ def undo_move(path: str) -> dict:
     return organizer_mod.undo_move(get_vault(), path)
 
 
-@mcp.tool()
+@register_tool
 def read_note(path: str) -> str:
     """Read a note by vault-relative path (e.g. 'Claude/Index.md')."""
     return get_vault().read(path)
 
 
-@mcp.tool()
+@register_tool
 def log_session(
     title: str, content: str, project: str, tags: list[str] | None = None
 ) -> str:
@@ -213,19 +231,19 @@ def log_session(
     )
 
 
-@mcp.tool()
+@register_tool
 def capture(content: str) -> str:
     """Append a quick timestamped thought to today's Claude/Inbox/ note."""
     return notes.capture(get_vault(), content)
 
 
-@mcp.tool()
+@register_tool
 def upsert_concept(name: str, content: str) -> str:
     """Create or extend an evergreen concept note in Claude/Concepts/."""
     return notes.upsert_concept(get_vault(), name, content)
 
 
-@mcp.tool()
+@register_tool
 def write_note(
     path: str,
     content: str,
@@ -245,20 +263,20 @@ def write_note(
     return path
 
 
-@mcp.tool()
+@register_tool
 def add_task(content: str, due: str | None = None) -> str:
     """Add a checkbox task to Claude/Tasks.md in Obsidian Tasks-plugin format.
     Optional due date as YYYY-MM-DD."""
     return tasks_mod.add_task(get_vault(), content, due=due)
 
 
-@mcp.tool()
+@register_tool
 def list_tasks(include_done: bool = False, folder: str | None = None) -> list[dict]:
     """List checkbox tasks across the vault (open only by default)."""
     return tasks_mod.list_tasks(get_vault(), include_done=include_done, folder=folder)
 
 
-@mcp.tool()
+@register_tool
 def query_notes(
     project: str | None = None,
     tags: list[str] | None = None,
@@ -273,21 +291,21 @@ def query_notes(
     )
 
 
-@mcp.tool()
+@register_tool
 def get_backlinks(path: str) -> list[str]:
     """List notes whose [[wikilinks]] point at the given note — use to see
     how a topic connects before extending it."""
     return graph.get_backlinks(get_vault(), path)
 
 
-@mcp.tool()
+@register_tool
 def list_recent(n: int = 10) -> list[dict]:
     """Most recently modified notes, newest first — use to catch up on what
     changed in the vault."""
     return graph.list_recent(get_vault(), n=n)
 
 
-@mcp.tool()
+@register_tool
 def onboard() -> dict:
     """Call this FIRST in a new session: returns the vault constitution,
     routing guide, tool cheat-sheet, and graph status."""
@@ -346,7 +364,7 @@ def _graph_db():
     return db
 
 
-@mcp.tool()
+@register_tool
 def index_brain(force: bool = False) -> dict:
     """Index new/changed vault notes into the semantic graph (LLM entity
     extraction via the configured CLI backend). Returns counts including
@@ -354,14 +372,14 @@ def index_brain(force: bool = False) -> dict:
     return indexer.run(get_vault(), _make_extractor(), force=force)
 
 
-@mcp.tool()
+@register_tool
 def find_entity(query: str, type: str | None = None) -> list[dict]:
     """Look up graph entities by name or alias (case-insensitive substring).
     Optional type filter: person, organization, domain, topic, project, source."""
     return cache_mod.find_entity(_graph_db(), query, type=type)
 
 
-@mcp.tool()
+@register_tool
 def related_notes(path: str, hops: int = 2) -> list[dict]:
     """Notes connected to the given note through shared graph entities within
     N hops. Each result includes the entity chain explaining the connection —
@@ -369,13 +387,13 @@ def related_notes(path: str, hops: int = 2) -> list[dict]:
     return cache_mod.related_notes(_graph_db(), get_vault(), path, hops=hops)
 
 
-@mcp.tool()
+@register_tool
 def graph_stats() -> dict:
     """Entity/edge/mention counts for the semantic graph."""
     return cache_mod.stats(_graph_db())
 
 
-@mcp.tool()
+@register_tool
 def consolidate_graph(apply: bool = False) -> dict:
     """Find duplicate graph entities (name variants of the same thing) via an
     LLM pass. Dry-run by default — returns proposed merges for review; call
@@ -383,17 +401,10 @@ def consolidate_graph(apply: bool = False) -> dict:
     return consolidate_mod.run(get_vault(), _make_consolidator(), apply=apply)
 
 
-# Tools that never write to the vault (the allow-list for read-only mode).
-READ_ONLY_TOOLS = frozenset({
-    "search_brain", "context_bundle", "read_note", "query_notes",
-    "get_backlinks", "list_recent", "list_tasks", "recall_bundle",
-    "sheet_query", "sheet_schema", "onboard", "find_entity",
-    "related_notes", "graph_stats", "librarian_status",
-})
 
 
 def apply_read_only() -> list[str]:
-    """Unregister every tool not on READ_ONLY_TOOLS. Returns removed names."""
+    """Legacy PR #10 test helper; runtime no longer calls private APIs."""
     tools = mcp._tool_manager._tools
     removed = sorted(n for n in list(tools) if n not in READ_ONLY_TOOLS)
     for name in removed:
@@ -402,8 +413,7 @@ def apply_read_only() -> list[str]:
 
 
 def main() -> None:
-    if os.environ.get("TESSERACT_READONLY", "").lower() in ("1", "true", "yes"):
-        apply_read_only()
+    # Safe tool selection happens before the server starts, on import.
     _warm_start()
     mcp.run()
 

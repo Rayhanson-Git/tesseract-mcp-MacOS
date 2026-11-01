@@ -18,7 +18,7 @@ import os
 import subprocess
 import sys
 
-DEFAULT_VAULT = r"C:\Vaults\Tesseract"
+DEFAULT_VAULT = ""  # Require explicit vault selection across platforms.
 
 
 def infer_project(cwd: str | None) -> str:
@@ -54,6 +54,10 @@ def main() -> None:
         if not project:
             return
         vault = os.environ.get("TESSERACT_VAULT_PATH", DEFAULT_VAULT)
+        if not vault:
+            sys.stderr.write(
+                "tesseract session-start: set TESSERACT_VAULT_PATH to enable recall.\n")
+            return
         if not os.path.isdir(vault):
             # Stay non-blocking, but say why recall is empty (stderr is not
             # injected into the session context).
