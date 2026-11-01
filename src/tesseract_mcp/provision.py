@@ -14,8 +14,10 @@ so tests never touch the network.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import re
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -35,6 +37,7 @@ class PluginSpec:
     id: str
     repo: str
     version: str
+    sha256: dict[str, str] = field(default_factory=dict)
 
 
 def load_plugin_manifest(path: Path | None = None) -> list[PluginSpec]:
@@ -45,7 +48,14 @@ def load_plugin_manifest(path: Path | None = None) -> list[PluginSpec]:
         for field in ("id", "repo", "version"):
             if not entry.get(field):
                 raise ProvisionError(f"plugins.json entry missing '{field}': {entry}")
-        specs.append(PluginSpec(entry["id"], entry["repo"], entry["version"]))
+        hashes = entry.get("sha256") or {}
+        if not isinstance(hashes, dict) or any(
+            k not in ("manifest.json", "main.js", "styles.css") or
+            not isinstance(v, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", v)
+            for k, v in hashes.items()
+        ):
+            raise ProvisionError(f"invalid sha256 checksums for {entry['id']}")
+        specs.append(PluginSpec(entry["id"], entry["repo"], entry["version"], hashes))
     return specs
 
 
@@ -82,7 +92,8 @@ def installed_version(vault_root: Path, plugin_id: str) -> str | None:
         return None
 
 
-def install_plugin(vault_root: Path, spec: PluginSpec, fetch=http_fetch) -> str:
+def install_plugin(vault_root: Path, spec: PluginSpec, fetch=http_fetch,
+                   require_checksums: bool = False) -> str:
     vault_root = Path(vault_root)
     if installed_version(vault_root, spec.id) == spec.version:
         return "ok"
@@ -100,6 +111,15 @@ def install_plugin(vault_root: Path, spec: PluginSpec, fetch=http_fetch) -> str:
     if main_js is None:
         raise ProvisionError(f"{spec.id}: no main.js in release {spec.version}")
     styles = fetch(_asset_url(spec, "styles.css"))  # optional; None is fine
+    for filename, data in (("manifest.json", manifest_bytes),
+                           ("main.js", main_js), ("styles.css", styles)):
+        if data is None:
+            continue
+        expected = spec.sha256.get(filename)
+        if require_checksums and not expected:
+            raise ProvisionError(f"{spec.id}: missing SHA-256 for {filename}")
+        if expected and hashlib.sha256(data).hexdigest() != expected.lower():
+            raise ProvisionError(f"{spec.id}: SHA-256 mismatch for {filename}")
 
     dest = vault_root / ".obsidian" / "plugins" / spec.id
     dest.mkdir(parents=True, exist_ok=True)
@@ -159,26 +179,43 @@ Provisioning done. Remaining human steps:
 """
 
 
-def provision(vault_root: str | Path, fetch=http_fetch) -> dict:
+def provision(vault_root: str | Path, fetch=http_fetch,
+              selected_plugins: set[str] | None = None,
+              require_checksums: bool = False,
+              owner: str | None = None,
+              scope: str = "vault") -> dict:
     vault_root = Path(vault_root)
     if not vault_root.is_dir():
         raise ProvisionError(f"Vault root does not exist: {vault_root}")
-    (vault_root / ".obsidian").mkdir(exist_ok=True)
-
-    specs = load_plugin_manifest()
+    if scope not in ("vault", "claude-only"):
+        raise ProvisionError("invalid provisioning scope")
+    all_specs = load_plugin_manifest()
+    if selected_plugins is not None:
+        unknown = set(selected_plugins) - {s.id for s in all_specs}
+        if unknown:
+            raise ProvisionError(f"unknown plugin IDs: {sorted(unknown)}")
+    if scope == "claude-only" and selected_plugins:
+        raise ProvisionError("cannot install plugins in claude-only scope")
+    if scope == "vault":
+        (vault_root / ".obsidian").mkdir(exist_ok=True)
+    specs = ([] if scope == "claude-only" else [
+        s for s in all_specs if selected_plugins is None or s.id in selected_plugins
+    ])
     plugins: dict[str, str] = {}
     errors: dict[str, str] = {}
     for spec in specs:
         try:
-            plugins[spec.id] = install_plugin(vault_root, spec, fetch)
+            plugins[spec.id] = install_plugin(
+                vault_root, spec, fetch, require_checksums=require_checksums
+            )
         except ProvisionError as e:
             errors[spec.id] = str(e)
 
-    enabled = enable_plugins(
+    enabled = (enable_plugins(
         vault_root, [s.id for s in specs if s.id not in errors]
-    )
-    overlays = apply_overlays(vault_root)
-    conventions = install_conventions(vault_root)
+    ) if scope == "vault" and specs else [])
+    overlays = apply_overlays(vault_root) if scope == "vault" else []
+    conventions = install_conventions(vault_root, owner=owner, scope=scope)
     return {
         "plugins": plugins,
         "errors": errors,
@@ -214,14 +251,29 @@ def main() -> None:
         "--check", action="store_true",
         help="Report pinned vs installed plugin versions without changing anything",
     )
+    selected = parser.add_mutually_exclusive_group()
+    selected.add_argument("--all-plugins", action="store_true",
+                          help="Explicitly opt into all curated plugins")
+    selected.add_argument("--plugins", nargs="+", metavar="ID",
+                          help="Install only selected plugin IDs")
+    parser.add_argument("--require-checksums", action="store_true",
+                        help="Fail closed if any downloaded asset lacks SHA-256")
+    parser.add_argument("--owner", help="Name for newly created agent guides")
+    parser.add_argument("--scope", choices=("vault", "claude-only"),
+                        default="vault", help="Restrict provisioning to Claude/")
     args = parser.parse_args()
     if args.check:
         print(json.dumps(check(args.vault), indent=2))
         return
-    report = provision(args.vault)
+    plugins = None if args.all_plugins else set(args.plugins or [])
+    report = provision(args.vault, selected_plugins=plugins,
+                       require_checksums=args.require_checksums,
+                       owner=args.owner, scope=args.scope)
     print(json.dumps(report, indent=2))
     if report["errors"]:
         print("\nWARNING: some plugins failed — re-run after checking pins/network.")
+    if not args.all_plugins and not args.plugins:
+        print("\nCommunity plugin installation skipped (opt in with --plugins or --all-plugins).")
     print(NEXT_STEPS)
 
 

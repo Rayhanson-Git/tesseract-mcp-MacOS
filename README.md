@@ -65,7 +65,7 @@ organizer cron jobs. Sweep reports land in `Claude/Librarian.md`; the
 `librarian_status` MCP tool reads the last run.
 
 ### One-command vault provisioning
-`python -m tesseract_mcp.provision <path-to-vault>` installs a pinned plugin
+`python -m tesseract_mcp.provision <path-to-vault> --all-plugins` installs a pinned plugin
 set, seeds settings (embed model pinned to what the search stack reads), and
 installs the agent conventions tree. `--check` reports version drift.
 
@@ -176,7 +176,7 @@ because `mcp.server.fastmcp` was renamed in mcp 2.x):
 git clone <repo> && cd tesseract-mcp
 python3 -m venv .venv
 .venv/bin/pip install -e .
-.venv/bin/python -m tesseract_mcp.provision <path-to-vault>
+.venv/bin/python -m tesseract_mcp.provision <path-to-vault> --all-plugins
 export TESSERACT_VAULT_PATH="<path-to-vault>"
 .venv/bin/python -m tesseract_mcp.mcp_sync
 ```
@@ -207,6 +207,15 @@ syncs on one vault.
   `librarian`, `conventions`) also write elsewhere (`.obsidian/plugins`, vault-root
   `AGENTS.md`/`CLAUDE.md`, `.smart-env`, organizer moves). Review them before
   running against a vault you care about; always start with `--dry-run`.
+- **Plugin supply chain.** The provisioning CLI installs no community plugins
+  unless you opt in with `--plugins ID ...` or `--all-plugins`. Asset SHA-256
+  pins are supported as `sha256` maps in `vault-template/plugins.json`.
+  `--require-checksums` fails closed on missing or mismatched pins; existing
+  entries do not yet ship asset hashes, so validate and pin assets before
+  using strict mode. The Python provisioning API still defaults to its
+  original full-install behavior for backwards compatibility.
+- **Operator scope.** `provision --scope claude-only` installs only Claude/
+  conventions, without touching vault-root guides, settings or plugins.
 - **Untrusted content.** Note text is passed to the extractor CLI (`claude -p` /
   `codex exec`) and results are written back as notes. Content ingested via
   the `fetch` and `arxiv` servers is untrusted; don't grant the extractor

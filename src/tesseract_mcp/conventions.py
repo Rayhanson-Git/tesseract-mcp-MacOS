@@ -24,8 +24,11 @@ DECISIONS_SEED = (
 )
 
 
-def install(vault_root: Path, owner: str | None = None) -> list[str]:
+def install(vault_root: Path, owner: str | None = None,
+            scope: str = "vault") -> list[str]:
     """Create missing pieces of the Claude/ tree. Returns what was created."""
+    if scope not in ("vault", "claude-only"):
+        raise ValueError("invalid conventions scope")
     vault_root = Path(vault_root)
     claude = vault_root / "Claude"
     created: list[str] = []
@@ -62,6 +65,8 @@ def install(vault_root: Path, owner: str | None = None) -> list[str]:
     owner = owner.strip()
     if "\n" in owner or "\r" in owner:
         raise ValueError("owner must be a single line")
+    if scope == "claude-only":
+        return created
     guide_text = ROOT_GUIDE.read_text(encoding="utf-8").replace(
         "{OWNER}", owner or "the vault owner"
     )
