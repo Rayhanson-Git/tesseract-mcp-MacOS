@@ -217,7 +217,9 @@ syncs on one vault.
 The Librarian is the single scheduled task for vault upkeep:
 
 ```powershell
-python -m tesseract_mcp.librarian <path-to-vault>
+python -m tesseract_mcp.librarian <path-to-vault>  # preview only
+# After review:
+python -m tesseract_mcp.librarian <path-to-vault> --apply
 ```
 
 It drains the index backlog, runs the organizer sweep, rebuilds the graph
@@ -225,10 +227,11 @@ cache when needed, proposes consolidation merges (dry-run only), and writes
 a health report to `Claude/Librarian.md`. Use `librarian_status` to read
 the last sweep without running it.
 
-**First run against a real vault must use `--dry-run`** and be human-reviewed
-before scheduling unattended applies — same operational rule as the
-organizer. Dry-run prints the formatted report and JSON result without
-writing state, moves, or throttle baselines.
+**The CLI now previews by default; writes require `--apply`.**
+`--dry-run` remains accepted. Apply sweeps cap organizer moves at 20 per
+run; overflow candidates are proposed for review. Pass `--scope claude-only`
+to skip organizing human-owned files. Scheduled jobs without `--apply` preview
+rather than silently reshuffling a vault.
 
 Model selection for the `claude` extractor backend (ignored by `codex`):
 

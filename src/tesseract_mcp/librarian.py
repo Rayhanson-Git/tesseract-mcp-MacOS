@@ -449,7 +449,10 @@ def run_sweep(
     embedder=None,
     apply: bool = True,
     now: datetime | None = None,
+    scope: str = "vault",
 ) -> dict:
+    if scope not in ("vault", "claude-only"):
+        raise ValueError("invalid librarian scope")
     now = now or datetime.now()
     state = load_state(vault)
     result: dict = {"steps": {}, "health": {}, "errors": {}, "applied": apply}
@@ -463,8 +466,11 @@ def run_sweep(
 
     if embedder is None:
         embedder = embeddings_mod.SentenceTransformerEmbedder()
+    organizer_options = {"apply": apply}
+    if scope != "vault":
+        organizer_options["scope"] = scope
     _step(result, "organize",
-          lambda: organizer_mod.run_sweep(vault, embedder, apply=apply))
+          lambda: organizer_mod.run_sweep(vault, embedder, **organizer_options))
 
     _step(result, "cache", lambda: _ensure_cache(vault, result))
 
@@ -502,11 +508,16 @@ def main() -> None:
         description="Librarian caretaker sweep: index, organize, cache, "
                     "consolidation proposals, health report.")
     parser.add_argument("vault", help="Path to the Obsidian vault root")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Report without writing anything")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true",
+                      help="Explicitly authorize indexing and organizer changes")
+    mode.add_argument("--dry-run", action="store_true",
+                      help="Preview only (the safe default)")
+    parser.add_argument("--scope", choices=("vault", "claude-only"),
+                        default="vault", help="Limit organizer moves to Claude/")
     args = parser.parse_args()
-    result = run_sweep(Vault(args.vault), apply=not args.dry_run)
-    if args.dry_run:
+    result = run_sweep(Vault(args.vault), apply=args.apply, scope=args.scope)
+    if not args.apply:
         print(format_report(result, datetime.now()))
     print(json.dumps(result, indent=2, default=str))
     if result["errors"]:

@@ -213,7 +213,15 @@ def undo_move(vault: Vault, note_rel: str) -> dict:
     return {"restored": entry["from"], "was": entry["to"]}
 
 
-def run_sweep(vault: Vault, embedder=None, apply: bool = False) -> dict:
+MAX_MOVES_PER_SWEEP = 20
+
+
+def run_sweep(vault: Vault, embedder=None, apply: bool = False,
+              scope: str = "vault", max_moves: int = MAX_MOVES_PER_SWEEP) -> dict:
+    if scope not in ("vault", "claude-only"):
+        raise ValueError("invalid organizer scope")
+    if max_moves < 0:
+        raise ValueError("max_moves must not be negative")
     if embedder is None:
         embedder = embeddings_mod.SentenceTransformerEmbedder()
     vectors = embeddings_mod.get_note_vectors(
@@ -226,6 +234,9 @@ def run_sweep(vault: Vault, embedder=None, apply: bool = False) -> dict:
     skipped: list[dict] = []
 
     for rel in iter_candidates(vault):
+        if scope == "claude-only" and not rel.startswith("Claude/"):
+            skipped.append({"path": rel, "reason": "outside permitted Claude/ scope"})
+            continue
         current = rel.split("/")[0] if "/" in rel and rel.split("/")[0] in taxonomy else None
         cls = classify(rel, vectors, labeled)
         if cls.folder is None:
@@ -255,6 +266,13 @@ def run_sweep(vault: Vault, embedder=None, apply: bool = False) -> dict:
             continue
         stem_name = rel.rsplit("/", 1)[-1]
         target_rel = f"{cls.folder}/{stem_name}"
+        if apply and len(moved) >= max_moves:
+            proposals.append({
+                "path": rel, "suggested": cls.folder,
+                "share": round(cls.share, 3), "neighbors": cls.neighbors[:3],
+                "reason": "per-sweep move cap reached",
+            })
+            continue
         if apply:
             record = move_note(vault, rel, target_rel)
             record_move(vault, record, share=cls.share, neighbors=cls.neighbors[:3])
